@@ -1,0 +1,10 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- The three-bar wing, skewed 16 degrees. -->
+    <path android:fillColor="@color/ink" android:pathData="M40.73,34L48.33,34L36.87,74L29.27,74Z" />
+    <path android:fillColor="@color/ink" android:pathData="M52.26,46.8L59.86,46.8L52.07,74L44.47,74Z" />
+    <path android:fillColor="@color/ink" android:pathData="M64.02,58.8L71.62,58.8L67.27,74L59.67,74Z" />
+</vector>

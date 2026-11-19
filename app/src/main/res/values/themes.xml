@@ -1,0 +1,10 @@
+<resources>
+    <color name="bg">#0A0A0B</color>
+    <color name="ink">#EDEDEF</color>
+
+    <style name="Theme.Coma" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/bg</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>
