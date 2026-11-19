@@ -26,10 +26,11 @@ so there is no Coma backend and nothing is stored in between.
 Install the companion plugin on the machine that runs Hermes:
 
 ```
-hermes plugins install sorsama/coma-hermes --enable
+hermes plugins install sorsama/coma-hermes --enable --force
 ```
 
-Restart Hermes, then run `hermes coma` in a terminal, or open **Coma** in Hermes Desktop, and scan
+Hermes' security scan blocks plugins that open a tunnel unless you pass `--force`; the plugin's
+README explains what it flags and why. Restart Hermes, then run `hermes coma` in a terminal, or open **Coma** in Hermes Desktop, and scan
 the QR with the app. The plugin opens a free Cloudflare tunnel, so the phone reaches the host from
 anywhere. Details, including what to know about security, are in
 [coma-hermes](https://github.com/sorsama/coma-hermes).
