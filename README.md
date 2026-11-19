@@ -6,7 +6,7 @@ keys stay on the machine that runs Hermes; the phone is a window onto it.
 <p>
   <img src="docs/connect.png" width="240" alt="Pairing with a host found on the network">
   <img src="docs/approval.png" width="240" alt="Approving a command Hermes wants to run">
-  <img src="docs/automate.png" width="240" alt="Scheduled jobs">
+  <img src="docs/scanner.png" width="240" alt="Scanning a pairing code">
 </p>
 
 ## What it does
@@ -79,6 +79,6 @@ app/src/main/java/com/zyphite/coma/
 
 - Icons: [Boxicons](https://boxicons.com) (MIT)
 - Type: [Geist](https://github.com/vercel/geist-font) (SIL Open Font License, see `GEIST-OFL.txt`)
-- QR scanning: [zxing-android-embedded](https://github.com/journeyapps/zxing-android-embedded)
+- QR scanning: CameraX and [ML Kit barcode scanning](https://developers.google.com/ml-kit/vision/barcode-scanning)
 
 Coma is not affiliated with Nous Research. MIT licensed.

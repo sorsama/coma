@@ -5,7 +5,6 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.net.Uri
 import android.widget.Toast
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -44,8 +43,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
-import com.journeyapps.barcodescanner.ScanContract
-import com.journeyapps.barcodescanner.ScanOptions
 import com.zyphite.coma.ComaViewModel
 import com.zyphite.coma.data.Found
 import com.zyphite.coma.data.Hermes
@@ -84,6 +81,7 @@ fun ConnectScreen(vm: ComaViewModel, onBack: (() -> Unit)?, onDone: () -> Unit) 
     var error by rememberSaveable { mutableStateOf<String?>(null) }
     var picked by remember { mutableStateOf<Found?>(null) }
     var code by rememberSaveable { mutableStateOf("") }
+    var scanning by rememberSaveable { mutableStateOf(false) }
 
     val finish = { failure: String? ->
         error = failure
@@ -105,24 +103,37 @@ fun ConnectScreen(vm: ComaViewModel, onBack: (() -> Unit)?, onDone: () -> Unit) 
             vm.connect(address, key, finish)
         }
     }
-    val scanner = rememberLauncherForActivityResult(ScanContract()) { result ->
-        val text = result.contents?.trim().orEmpty()
-        val link = Uri.parse(text)
-        when {
-            text.isEmpty() -> Unit
-            link.scheme == "coma" && link.host == "pair" -> {
-                error = null
-                vm.pair(
-                    Offer(
-                        link.getQueryParameter("relay").orEmpty(), link.getQueryParameter("host").orEmpty(),
-                        link.getQueryParameter("token").orEmpty(), link.getQueryParameter("name").orEmpty(),
-                    ),
-                    finish,
-                )
-            }
-            Hermes.address(text) != null -> { byHand = true; address = text; error = null }
-            else -> error = "That QR code isn't a Coma pairing code."
-        }
+    if (scanning) {
+        Scanner(
+            accept = { text ->
+                val link = Uri.parse(text)
+                when {
+                    link.scheme == "coma" && link.host == "pair" -> {
+                        scanning = false
+                        error = null
+                        vm.pair(
+                            Offer(
+                                link.getQueryParameter("relay").orEmpty(), link.getQueryParameter("host").orEmpty(),
+                                link.getQueryParameter("token").orEmpty(), link.getQueryParameter("name").orEmpty(),
+                            ),
+                            finish,
+                        )
+                        true
+                    }
+                    Hermes.address(text) != null && "." in text -> {
+                        // A plain address: fill it in and let the key be typed.
+                        scanning = false
+                        byHand = true
+                        address = text
+                        error = null
+                        true
+                    }
+                    else -> false
+                }
+            },
+            onClose = { scanning = false },
+        )
+        return
     }
 
     Column(
@@ -165,12 +176,7 @@ fun ConnectScreen(vm: ComaViewModel, onBack: (() -> Unit)?, onDone: () -> Unit) 
 
         Row(
             Modifier.padding(top = 12.dp).fillMaxWidth().height(52.dp)
-                .press(.96f) {
-                    scanner.launch(
-                        ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE).setBeepEnabled(false)
-                            .setOrientationLocked(false).setPrompt("Scan the code that Hermes shows"),
-                    )
-                }
+                .press(.96f) { scanning = true }
                 .clip(RoundedCornerShape(12.dp)).background(C.Text),
             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
             verticalAlignment = Alignment.CenterVertically,
