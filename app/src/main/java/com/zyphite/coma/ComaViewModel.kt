@@ -3,6 +3,7 @@ package com.zyphite.coma
 import android.app.Application
 import android.content.Context
 import android.content.pm.ApplicationInfo
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import androidx.compose.runtime.getValue
@@ -25,6 +26,7 @@ import com.zyphite.coma.data.Host
 import com.zyphite.coma.data.Job
 import com.zyphite.coma.data.ModelChoice
 import com.zyphite.coma.data.ModelOptions
+import com.zyphite.coma.data.Offer
 import com.zyphite.coma.data.Session
 import com.zyphite.coma.data.Skill
 import com.zyphite.coma.data.StepState
@@ -125,42 +127,68 @@ class ComaViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * Adds the host at [address] once it has proved to be a Hermes API server that accepts [key].
-     * A pairing code carries the host's [name]; pairing a name this phone already has updates that host,
-     * because a tunnel's address changes every time it is opened.
      * [onResult] gets an error sentence, or null when the host was saved and made active.
      */
-    fun connect(address: String, key: String, name: String? = null, onResult: (String?) -> Unit) {
+    fun connect(address: String, key: String, onResult: (String?) -> Unit) {
         val url = Hermes.address(address) ?: return onResult("Type the host's address, like 192.168.1.20:8642.")
         if (key.isBlank()) return onResult("Type the API key from the host's .env file.")
-        val label = name?.trim()?.take(40)?.ifBlank { null }
-        val replaces = if (label == null) -1 else hosts.indexOfFirst { it.name == label }
-        if (replaces < 0) {
-            if (hosts.any { it.url == url }) return onResult("That host is already on this phone.")
-            if (!canAddHost) return onResult("The free plan covers one host. Plus adds as many as you like.")
-        }
+        if (hosts.any { it.url == url }) return onResult("That host is already on this phone.")
+        if (!canAddHost) return onResult(LIMIT)
+        if (connecting) return
         val authority = url.substringAfter("://").substringBefore("/")
         val bare = authority.substringBefore(":")
-        val candidate = Host(label ?: if (hosts.any { it.name == bare }) authority else bare, url, key.trim())
+        val candidate = Host(if (hosts.any { it.name == bare }) authority else bare, url, key.trim())
+        connecting = true
+        viewModelScope.launch { onResult(adopt(candidate)) }
+    }
+
+    /**
+     * Pairs through a relay with what a host's QR or its six-digit code offered. A host this phone
+     * already has is updated in place, so pairing it again never counts against the plan.
+     */
+    fun pair(offer: Offer, onResult: (String?) -> Unit) {
+        val relay = Hermes.address(offer.relay)?.takeIf { offer.host.isNotBlank() && offer.token.isNotBlank() }
+            ?: return onResult("That isn't a Coma pairing code.")
+        val url = "$relay/h/${offer.host}"
+        val known = hosts.any { it.url == url }
+        if (!known && !canAddHost) return onResult(LIMIT)
+        if (connecting) return
         connecting = true
         viewModelScope.launch {
             val error = try {
-                withContext(Dispatchers.IO) { Hermes(candidate).verify() }
-                null
+                val device = withContext(Dispatchers.IO) {
+                    Discovery.join(offer.copy(relay = relay), Build.MODEL ?: "Phone", billing.purchaseToken)
+                }
+                val name = offer.name.trim().take(40).ifBlank { offer.host.take(8) }
+                adopt(Host(name, url, key = "", device = device))
             } catch (failure: HermesException) {
+                connecting = false
                 failure.message
-            }
-            connecting = false
-            if (error == null) {
-                if (replaces in hosts.indices) hosts[replaces] = candidate else hosts.add(candidate)
-                saveHosts()
-                activeHost = hosts.indexOf(candidate)
-                prefs.edit().putInt("active", activeHost).apply()
-                forgetHostState()
-                online = true
-                refreshSessions()
             }
             onResult(error)
         }
+    }
+
+    /** Saves [candidate] and makes it active once it answers as Hermes. Returns an error sentence, or null. */
+    private suspend fun adopt(candidate: Host): String? {
+        val error = try {
+            withContext(Dispatchers.IO) { Hermes(candidate).verify() }
+            null
+        } catch (failure: HermesException) {
+            failure.message
+        }
+        connecting = false
+        if (error == null) {
+            val replaces = hosts.indexOfFirst { it.url == candidate.url }
+            if (replaces >= 0) hosts[replaces] = candidate else hosts.add(candidate)
+            saveHosts()
+            activeHost = hosts.indexOf(candidate)
+            prefs.edit().putInt("active", activeHost).apply()
+            forgetHostState()
+            online = true
+            refreshSessions()
+        }
+        return error
     }
 
     /** Looks for hosts on this network that have pairing started. */
@@ -181,16 +209,13 @@ class ComaViewModel(app: Application) : AndroidViewModel(app) {
     fun pairWith(host: Found, code: String, onResult: (String?) -> Unit) {
         if (code.length != 6) return onResult("Type the six digits ${host.name} is showing.")
         if (connecting) return
-        connecting = true
         viewModelScope.launch {
-            val pairing = try {
+            val offer = try {
                 withContext(Dispatchers.IO) { Discovery.pair(host, code) }
             } catch (failure: HermesException) {
-                connecting = false
                 return@launch onResult(failure.message)
             }
-            connecting = false
-            connect(pairing.url, pairing.key, pairing.name, onResult)
+            pair(offer, onResult)
         }
     }
 
@@ -402,17 +427,22 @@ class ComaViewModel(app: Application) : AndroidViewModel(app) {
         (0 until array.length()).mapNotNull { index ->
             val item = array.getJSONObject(index)
             // A key that no longer opens (a restored backup, a cleared keystore) drops its host: re-add it.
-            Vault.open(item.getString("key"))?.let { Host(item.getString("name"), item.getString("url"), it) }
+            Vault.open(item.getString("key"))?.let {
+                Host(item.getString("name"), item.getString("url"), it, item.optString("device"))
+            }
         }
     }.getOrDefault(emptyList())
 
     private fun saveHosts() {
         val array = JSONArray()
-        hosts.forEach { array.put(JSONObject().put("name", it.name).put("url", it.url).put("key", Vault.seal(it.key))) }
+        hosts.forEach {
+            array.put(JSONObject().put("name", it.name).put("url", it.url).put("key", Vault.seal(it.key)).put("device", it.device))
+        }
         prefs.edit().putString("hosts", array.toString()).apply()
     }
 
     companion object {
         const val FREE_HOSTS = 1
+        private const val LIMIT = "The free plan covers one host. Plus adds as many as you like."
     }
 }

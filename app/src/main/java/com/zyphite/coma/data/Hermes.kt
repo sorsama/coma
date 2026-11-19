@@ -10,8 +10,14 @@ import java.net.URL
 import java.net.UnknownHostException
 import javax.net.ssl.SSLException
 
-/** A Hermes host this phone talks to: the address of its API server and the key that guards it. */
-data class Host(val name: String, val url: String, val key: String)
+/**
+ * A Hermes host this phone talks to. A direct host is the address of its API server and the [key]
+ * that guards it. A host behind a relay is the relay's address for it and this phone's [device] id
+ * there; it has no key, because the phone signs each request instead (see [DeviceKey]).
+ */
+data class Host(val name: String, val url: String, val key: String, val device: String = "") {
+    val relayed: Boolean get() = device.isNotEmpty()
+}
 
 data class Session(
     val id: String,
@@ -274,7 +280,15 @@ class Hermes(private val host: Host) {
             connection.connectTimeout = 8_000
             // Streams send a keepalive every ten seconds, so a silent minute means the link is gone.
             connection.readTimeout = if (stream) 60_000 else readTimeout
-            if (auth) connection.setRequestProperty("Authorization", "Bearer ${host.key}")
+            if (host.relayed) {
+                // The relay checks who is asking on every request, including the ones Hermes leaves open.
+                val time = System.currentTimeMillis().toString()
+                connection.setRequestProperty("X-Coma-Device", host.device)
+                connection.setRequestProperty("X-Coma-Time", time)
+                connection.setRequestProperty("X-Coma-Signature", DeviceKey.sign("$time\n$method\n$path"))
+            } else if (auth) {
+                connection.setRequestProperty("Authorization", "Bearer ${host.key}")
+            }
             connection.setRequestProperty("Accept", if (stream) "text/event-stream" else "application/json")
             if (body != null) {
                 connection.doOutput = true
@@ -301,6 +315,7 @@ class Hermes(private val host: Host) {
         return HermesException(
             status,
             when {
+                said.isNotEmpty() && host.relayed -> said
                 status == 401 || status == 403 -> "The host refused that API key."
                 status == 404 && said.isEmpty() -> "That address answered, but not as a Hermes API server."
                 status == 429 -> "Hermes is at its limit of runs. Try again in a moment."

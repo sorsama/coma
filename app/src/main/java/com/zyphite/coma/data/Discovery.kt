@@ -12,13 +12,12 @@ import java.net.URL
 /** A machine on this network that has Coma pairing started. [port] is where it takes the pairing code. */
 data class Found(val name: String, val ip: String, val port: Int)
 
-/** What a host hands over for the right pairing code. */
-data class Pairing(val url: String, val key: String, val name: String)
+/** What a host offers for pairing: its relay, its id there, and a token that admits one phone. */
+data class Offer(val relay: String, val host: String, val token: String, val name: String)
 
 /**
  * Finds hosts on the local network. The coma plugin listens for a UDP broadcast and answers with the
- * machine's name; the address and key are only given out over [pair], for the six-digit code
- * the host shows. Both calls block; run them off the main thread.
+ * machine's name; its pairing offer is only given out over [pair], for the six-digit code the host shows. Both calls block; run them off the main thread.
  */
 object Discovery {
     private const val PORT = 48642
@@ -61,8 +60,8 @@ object Discovery {
         return found.values.toList()
     }
 
-    /** Trades the code the host shows for its address and key. */
-    fun pair(host: Found, code: String): Pairing {
+    /** Trades the code the host shows for its pairing offer. */
+    fun pair(host: Found, code: String): Offer {
         val connection = try {
             (URL("http://${host.ip}:${host.port}/pair").openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
@@ -78,11 +77,53 @@ object Discovery {
         try {
             if (connection.responseCode == 403) throw HermesException(403, "That isn't the code ${host.name} is showing.")
             val answer = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
-            return Pairing(answer.getString("url"), answer.getString("key"), answer.optString("name").ifBlank { host.name })
+            return Offer(
+                answer.getString("relay"), answer.getString("host"), answer.getString("token"),
+                answer.optString("name").ifBlank { host.name },
+            )
         } catch (failure: HermesException) {
             throw failure
         } catch (failure: Exception) {
             throw HermesException(0, "${host.name} stopped answering. Is pairing still running on it?")
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    /**
+     * Takes this phone's place on [offer]'s relay and returns its device id there. [purchaseToken] is
+     * the phone's Plus subscription, if it has one, which lifts the host's limit on phones.
+     */
+    fun join(offer: Offer, deviceName: String, purchaseToken: String?): String {
+        val body = JSONObject().put("token", offer.token).put("name", deviceName).put("public_key", DeviceKey.public())
+        if (purchaseToken != null) body.put("purchase_token", purchaseToken)
+        val relay = runCatching { URL(offer.relay).host }.getOrNull() ?: offer.relay
+        val connection = try {
+            (URL("${offer.relay}/v1/hosts/${offer.host}/devices").openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 8_000
+                readTimeout = 15_000
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json")
+                outputStream.use { it.write(body.toString().toByteArray()) }
+            }
+        } catch (failure: IOException) {
+            throw HermesException(0, "Can't reach the relay at $relay.")
+        }
+        try {
+            val status = connection.responseCode
+            val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+            val answer = runCatching { JSONObject(stream.bufferedReader().use { it.readText() }) }.getOrNull() ?: JSONObject()
+            if (status !in 200..299) {
+                throw HermesException(
+                    status, answer.optJSONObject("error")?.optString("message").orEmpty().ifBlank { "The relay refused this phone ($status)." },
+                )
+            }
+            return answer.getString("device_id")
+        } catch (failure: HermesException) {
+            throw failure
+        } catch (failure: Exception) {
+            throw HermesException(0, "Can't reach the relay at $relay.")
         } finally {
             connection.disconnect()
         }

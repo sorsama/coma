@@ -34,6 +34,10 @@ class BillingManager(app: Application, private val prefs: SharedPreferences) : P
     var price by mutableStateOf(LIST_PRICE)
         private set
 
+    /** Google Play's token for the active Plus purchase. A relay checks it with Google to lift a host's limit. */
+    var purchaseToken: String? = null
+        private set
+
     /** A sentence to show under the upgrade button when a purchase could not start or finish. */
     var message by mutableStateOf<String?>(null)
 
@@ -123,6 +127,8 @@ class BillingManager(app: Application, private val prefs: SharedPreferences) : P
         val owned = purchases.filter {
             PRODUCT_ID in it.products && it.purchaseState == Purchase.PurchaseState.PURCHASED
         }
+        owned.firstOrNull()?.let { purchaseToken = it.purchaseToken }
+        if (owned.isEmpty() && !merge) purchaseToken = null
         if (owned.isNotEmpty() || !merge) {
             isPlus = owned.isNotEmpty()
             prefs.edit().putBoolean(KEY_PLUS, isPlus).apply()

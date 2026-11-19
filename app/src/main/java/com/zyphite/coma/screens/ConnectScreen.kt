@@ -49,6 +49,7 @@ import com.journeyapps.barcodescanner.ScanOptions
 import com.zyphite.coma.ComaViewModel
 import com.zyphite.coma.data.Found
 import com.zyphite.coma.data.Hermes
+import com.zyphite.coma.data.Offer
 import com.zyphite.coma.ui.C
 import com.zyphite.coma.ui.Field
 import com.zyphite.coma.ui.Ico
@@ -69,9 +70,9 @@ import com.zyphite.coma.ui.ts
 private const val COMMAND = "hermes coma"
 
 /**
- * First run, and "add a host". The host runs the coma plugin (hermes coma, or the Coma page in Hermes Desktop), which opens a Cloudflare tunnel to its Hermes
- * and shows a QR of `coma://connect?url=…&key=…&name=…`; scanning it pairs at once. The address and
- * key can also be typed, for a host behind your own proxy. Hosts with pairing started on the same network
+ * First run, and "add a host". The host runs the coma plugin (hermes coma, or the Coma page in Hermes
+ * Desktop), which links its Hermes to a relay and shows a QR of `coma://pair?relay=…&host=…&token=…`;
+ * scanning it pairs at once. An address and API key can also be typed, to reach a host directly. Hosts with pairing started on the same network
  * are found by themselves and pair with the six-digit code they show. [onBack] is null on first run.
  */
 @Composable
@@ -84,25 +85,24 @@ fun ConnectScreen(vm: ComaViewModel, onBack: (() -> Unit)?, onDone: () -> Unit) 
     var picked by remember { mutableStateOf<Found?>(null) }
     var code by rememberSaveable { mutableStateOf("") }
 
+    val finish = { failure: String? ->
+        error = failure
+        if (failure == null) onDone()
+    }
+
     LaunchedEffect(Unit) { vm.search() }
     val pair = {
         picked?.let { host ->
             error = null
-            vm.pairWith(host, code) { failure ->
-                error = failure
-                if (failure == null) onDone()
-            }
+            vm.pairWith(host, code, finish)
         }
         Unit
     }
 
-    val connect = { url: String, secret: String, name: String? ->
+    val connect = {
         if (!vm.connecting) {
             error = null
-            vm.connect(url, secret, name) { failure ->
-                error = failure
-                if (failure == null) onDone()
-            }
+            vm.connect(address, key, finish)
         }
     }
     val scanner = rememberLauncherForActivityResult(ScanContract()) { result ->
@@ -110,9 +110,16 @@ fun ConnectScreen(vm: ComaViewModel, onBack: (() -> Unit)?, onDone: () -> Unit) 
         val link = Uri.parse(text)
         when {
             text.isEmpty() -> Unit
-            link.scheme == "coma" && link.getQueryParameter("url") != null -> connect(
-                link.getQueryParameter("url").orEmpty(), link.getQueryParameter("key").orEmpty(), link.getQueryParameter("name"),
-            )
+            link.scheme == "coma" && link.host == "pair" -> {
+                error = null
+                vm.pair(
+                    Offer(
+                        link.getQueryParameter("relay").orEmpty(), link.getQueryParameter("host").orEmpty(),
+                        link.getQueryParameter("token").orEmpty(), link.getQueryParameter("name").orEmpty(),
+                    ),
+                    finish,
+                )
+            }
             Hermes.address(text) != null -> { byHand = true; address = text; error = null }
             else -> error = "That QR code isn't a Coma pairing code."
         }
@@ -240,16 +247,16 @@ fun ConnectScreen(vm: ComaViewModel, onBack: (() -> Unit)?, onDone: () -> Unit) 
                     key, { key = it; error = null }, "API_SERVER_KEY",
                     style = ts(16.sp, mono = true), placeholderColor = C.Mute,
                     keyboard = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Go),
-                    desc = "API key", onDone = { connect(address, key, null) },
+                    desc = "API key", onDone = connect,
                 )
             }
-            Outline(Icons.ArrowRight, "Connect", Modifier.padding(top = 12.dp).fillMaxWidth()) { connect(address, key, null) }
+            Outline(Icons.ArrowRight, "Connect", Modifier.padding(top = 12.dp).fillMaxWidth(), connect)
         }
 
         Spacer(Modifier.weight(1f).heightIn(min = 28.dp))
         T(
-            "Threads, memory and keys stay on your host. Pairing opens an encrypted Cloudflare tunnel to it; " +
-                "nothing is stored in between.",
+            "Threads, memory and keys stay on your host. A relay passes messages between it and this phone " +
+                "and stores none of them.",
             size = 13.sp, color = C.Dim,
         )
     }

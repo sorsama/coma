@@ -18,30 +18,38 @@ keys stay on the machine that runs Hermes; the phone is a window onto it.
 - **Mind**: the skills and toolsets the host has.
 - **System**: the host's readiness checks, model and connected messaging platforms.
 
-It talks to Hermes' own [API server](https://hermes-agent.nousresearch.com/docs/user-guide/features/api-server),
-so there is no Coma backend and nothing is stored in between.
+It talks to Hermes' own [API server](https://hermes-agent.nousresearch.com/docs/user-guide/features/api-server).
+There is no Coma account and no Coma database: a relay passes messages between the phone and your
+Hermes and stores none of them.
 
 ## Pair it with your Hermes
 
 Install the companion plugin on the machine that runs Hermes:
 
 ```
-hermes plugins install sorsama/coma-hermes --enable --force
+hermes plugins install sorsama/coma-hermes --enable
 ```
 
-Hermes' security scan blocks plugins that open a tunnel unless you pass `--force`; the plugin's
-README explains what it flags and why. Restart Hermes, then run `hermes coma` in a terminal, or open **Coma** in Hermes Desktop, and scan
-the QR with the app. The plugin opens a free Cloudflare tunnel, so the phone reaches the host from
-anywhere. Details, including what to know about security, are in
+Restart Hermes, then run `hermes coma` in a terminal, or open **Coma** in Hermes Desktop, and scan
+the QR with the app. On the same Wi-Fi the app also finds the machine by itself. Details are in
 [coma-hermes](https://github.com/sorsama/coma-hermes).
 
-You can also skip the plugin and type an address and API key by hand, for a host on your own
+You can also skip the relay and type an address and API key by hand, for a host on your own
 network, VPN or HTTPS proxy.
 
-## Plans
+## The relay and plans
 
-One host is free. **Plus** (99 baht a month, a Google Play subscription with product id
-`coma_plus_monthly`) lifts the limit. The limit is counted on the phone; there is no account.
+Hermes dials out to a relay and the phone reaches it there, so nothing has to be opened on your
+router. Your Hermes API key stays on your machine, and the phone signs every request with a key
+that never leaves its keystore.
+
+The hosted relay, `coma-relay.zyphite.com`, is free for one phone per Hermes. **Plus** (99 baht a
+month, a Google Play subscription with product id `coma_plus_monthly`) pairs any number of phones
+and adds any number of hosts to the app.
+
+The relay is [open source](https://github.com/sorsama/coma-relay). Run your own on a free Cloudflare
+account and point Hermes at it with `hermes coma --relay https://your.relay`; a relay you run has no
+limits.
 
 ## Build
 
@@ -59,7 +67,8 @@ beyond Compose foundation; the design kit is in `app/src/main/java/com/zyphite/c
 ```
 app/src/main/java/com/zyphite/coma/
   data/Hermes.kt      the Hermes API client
-  data/Discovery.kt   finding hosts on the local network
+  data/Discovery.kt   finding hosts on the local network, joining a relay
+  data/DeviceKey.kt   this phone's signing key, kept in the Android Keystore
   data/Vault.kt       API keys, encrypted with the Android Keystore
   ComaViewModel.kt    app state
   screens/            one file per screen
